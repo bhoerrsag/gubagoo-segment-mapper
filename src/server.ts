@@ -479,13 +479,35 @@ app.post('/api/process-lead-email', upload.none(), async (req, res) => {
     console.log('📋 Raw request body:', JSON.stringify(req.body, null, 2));
     
     // Extract email content (SendGrid format)
-    const emailSubject = req.body.subject || req.body.Subject || req.body.headers?.Subject;
-    const emailBody = req.body.text || req.body.html || req.body.body;
-    const emailFrom = req.body.from || req.body.From || req.body.headers?.From;
+    const emailSubject = req.body.subject;
+    const emailFrom = req.body.from;
+    const emailTo = req.body.to;
+    
+    // SendGrid sends the full email in the 'email' field as raw MIME
+    const rawEmail = req.body.email;
+    
+    // Extract text content from the raw email
+    let emailBody = '';
+    if (rawEmail) {
+      // Look for text/plain content
+      const textMatch = rawEmail.match(/Content-Type: text\/plain[^]*?\r?\n\r?\n([^]*?)(?=\r?\n--|\r?\n\r?\nContent-Type|\r?\n$)/);
+      if (textMatch) {
+        emailBody = textMatch[1].trim();
+      }
+      
+      // If no plain text, try HTML content  
+      if (!emailBody) {
+        const htmlMatch = rawEmail.match(/Content-Type: text\/html[^]*?\r?\n\r?\n([^]*?)(?=\r?\n--|\r?\n\r?\nContent-Type|\r?\n$)/);
+        if (htmlMatch) {
+          emailBody = htmlMatch[1].trim();
+        }
+      }
+    }
     
     console.log('Email from:', emailFrom);
     console.log('Email subject:', emailSubject);
-    console.log('Email body preview:', emailBody ? emailBody.substring(0, 200) : 'No body found');
+    console.log('Email to:', emailTo);
+    console.log('Email body extracted:', emailBody ? emailBody.substring(0, 200) : 'No body found');
     
     // Parse ADF/XML from email body
     const leadData = await parseADFEmail(emailBody);
