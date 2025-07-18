@@ -24,6 +24,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // Add this line for form data
 app.use(express.static('public'));
 
 // Health check endpoint
