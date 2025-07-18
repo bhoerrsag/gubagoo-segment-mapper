@@ -327,6 +327,240 @@ app.get('/api/gubagoo-mapping/:visitorUuid', async (req, res) => {
   }
 });
 
+// Helper function to parse ADF/XML from email
+async function parseADFEmail(emailBody: string) {
+  try {
+    // Extract XML from email body (it might be in HTML or plain text)
+    let xmlContent = emailBody;
+    
+    // If email is HTML, extract XML from it
+    if (emailBody.includes('<html>') || emailBody.includes('&lt;adf&gt;')) {
+      // Handle HTML-encoded XML
+      xmlContent = emailBody
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&');
+    }
+    
+    // Extract the ADF XML block
+    const adfMatch = xmlContent.match(/<adf>[\s\S]*?<\/adf>/i);
+    if (!adfMatch) {
+      console.log('❌ No ADF XML found in email body');
+      return null;
+    }
+    
+    const adfXml = adfMatch[0];
+    console.log('📋 Extracted ADF XML:', adfXml.substring(0, 200) + '...');
+    
+    // Parse key fields from XML (simple regex parsing)
+    const leadId = extractXmlField(adfXml, 'id', 'source="LeadId"');
+    const sdSessionId = extractXmlField(adfXml, 'id', 'source="sdSessionId"');
+    const firstName = extractXmlField(adfXml, 'name', 'part="first"');
+    const lastName = extractXmlField(adfXml, 'name', 'part="last"');
+    const email = extractXmlField(adfXml, 'email');
+    const phone = extractXmlField(adfXml, 'phone');
+    const year = extractXmlField(adfXml, 'year');
+    const make = extractXmlField(adfXml, 'make');
+    const model = extractXmlField(adfXml, 'model');
+    const vin = extractXmlField(adfXml, 'vin');
+    const stock = extractXmlField(adfXml, 'stock');
+    
+    return {
+      leadId,
+      sdSessionId,
+      firstName,
+      lastName,
+      email,
+      phone,
+      year: year ? parseInt(year) : null,
+      make,
+      model,
+      vin,
+      stock,
+      requestDate: new Date().toISOString(),
+      rawXml: adfXml
+    };
+    
+  } catch (error) {
+    console.error('❌ Error parsing ADF email:', error);
+    return null;
+  }
+}
+
+// Helper function to extract XML field values
+function extractXmlField(xml: string, tagName: string, attributes?: string): string | null {
+  try {
+    let pattern;
+    if (attributes) {
+      pattern = new RegExp(`<${tagName}[^>]*${attributes}[^>]*><!\\[CDATA\\[([^\\]]+)\\]\\]><\\/${tagName}>|<${tagName}[^>]*${attributes}[^>]*>([^<]+)<\\/${tagName}>`, 'i');
+    } else {
+      pattern = new RegExp(`<${tagName}[^>]*><!\\[CDATA\\[([^\\]]+)\\]\\]><\\/${tagName}>|<${tagName}[^>]*>([^<]+)<\\/${tagName}>`, 'i');
+    }
+    
+    const match = xml.match(pattern);
+    return match ? (match[1] || match[2] || '').trim() : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+// Helper function to send lead to Segment
+async function sendLeadToSegment(leadData: any) {
+  try {
+    console.log('📊 Sending lead to Segment:', leadData.leadId);
+    
+    // This is where we'll integrate with Segment
+    // For now, just log what we would send
+    const segmentEvent = {
+      anonymousId: leadData.ajs_anonymous_id,
+      event: 'Lead Submitted',
+      properties: {
+        source: 'Gubagoo Virtual Retailing',
+        leadId: leadData.leadId,
+        email: leadData.email,
+        phone: leadData.phone,
+        firstName: leadData.firstName,
+        lastName: leadData.lastName,
+        
+        // Vehicle info
+        vehicle: {
+          year: leadData.year,
+          make: leadData.make,
+          model: leadData.model,
+          vin: leadData.vin,
+          stock: leadData.stock
+        },
+        
+        // Attribution data
+        utm_source: leadData.utm_source,
+        utm_medium: leadData.utm_medium,
+        utm_campaign: leadData.utm_campaign,
+        utm_term: leadData.utm_term,
+        utm_content: leadData.utm_content,
+        gclid: leadData.gclid,
+        fbclid: leadData.fbclid,
+        referrer: leadData.referrer,
+        landing_page: leadData.landing_page
+      }
+    };
+    
+    console.log('✅ Segment event ready:', segmentEvent);
+    
+    // TODO: Implement actual Segment API call
+    // await analytics.track(segmentEvent);
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Error sending to Segment:', error);
+    throw error;
+  }
+}
+
+// Email processing endpoint for ADF/XML leads
+app.post('/api/process-lead-email', async (req, res) => {
+  try {
+    console.log('📧 Received lead email for processing');
+    
+    // Extract email content (format depends on webhook service)
+    const emailSubject = req.body.subject || req.body.Subject;
+    const emailBody = req.body.body || req.body.text || req.body.html;
+    const emailFrom = req.body.from || req.body.From;
+    
+    console.log('Email from:', emailFrom);
+    console.log('Email subject:', emailSubject);
+    
+    // Parse ADF/XML from email body
+    const leadData = await parseADFEmail(emailBody);
+    
+    if (!leadData) {
+      return res.status(400).json({ error: 'Could not parse ADF/XML from email' });
+    }
+    
+    if (!leadData.sdSessionId) {
+      console.log('⚠️ No sdSessionId found in ADF data');
+      // Store as pending lead for manual review
+      await SupabaseService.savePendingLead({
+        lead_id: leadData.leadId,
+        sd_session_id: null,
+        email_subject: emailSubject,
+        email_body: emailBody,
+        lead_data: leadData
+      });
+      
+      return res.json({ 
+        success: true, 
+        message: 'Lead saved as pending - no sdSessionId found',
+        leadId: leadData.leadId 
+      });
+    }
+    
+    console.log('✅ Parsed lead data:', leadData);
+    
+    // Look up visitor data using session ID
+    const visitorData = await SupabaseService.getMappingBySessionId(leadData.sdSessionId);
+    
+    if (!visitorData) {
+      console.log('⚠️ No visitor data found for session ID:', leadData.sdSessionId);
+      // Store as pending lead for manual review
+      await SupabaseService.savePendingLead({
+        lead_id: leadData.leadId,
+        sd_session_id: leadData.sdSessionId,
+        email_subject: emailSubject,
+        email_body: emailBody,
+        lead_data: leadData
+      });
+      
+      return res.json({ 
+        success: true, 
+        message: 'Lead saved as pending - no visitor data found',
+        leadId: leadData.leadId 
+      });
+    }
+    
+    console.log('🎯 Found matching visitor data:', visitorData);
+    
+    // Combine lead data with visitor attribution
+    const completeLeadData = {
+      ...leadData,
+      ajs_anonymous_id: visitorData.ajs_anonymous_id,
+      gubagoo_visitor_uuid: visitorData.gubagoo_visitor_uuid,
+      utm_source: visitorData.utm_source,
+      utm_medium: visitorData.utm_medium,
+      utm_campaign: visitorData.utm_campaign,
+      utm_term: visitorData.utm_term,
+      utm_content: visitorData.utm_content,
+      gclid: visitorData.gclid,
+      fbclid: visitorData.fbclid,
+      referrer: visitorData.referrer,
+      landing_page: visitorData.landing_page
+    };
+    
+    // Save complete lead to database
+    await SupabaseService.saveCompleteLead(completeLeadData);
+    
+    // Send to Segment with full attribution
+    await sendLeadToSegment(completeLeadData);
+    
+    res.json({ 
+      success: true, 
+      message: 'Lead processed successfully with full attribution',
+      leadId: leadData.leadId,
+      attribution: {
+        utm_source: visitorData.utm_source,
+        utm_medium: visitorData.utm_medium,
+        utm_campaign: visitorData.utm_campaign
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error processing lead email:', error);
+    res.status(500).json({ 
+      error: 'Internal server error processing lead',
+      message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
 // Stats endpoint (optional - for monitoring)
 app.get('/api/stats', async (req, res) => {
   try {
