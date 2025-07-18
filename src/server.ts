@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import multer from 'multer';
 
 dotenv.config();
 
@@ -26,6 +27,9 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true })); // Add this line for form data
 app.use(express.static('public'));
+
+// Configure multer for multipart/form-data (SendGrid emails)
+const upload = multer();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -466,7 +470,7 @@ async function sendLeadToSegment(leadData: any) {
 }
 
 // Email processing endpoint for ADF/XML leads
-app.post('/api/process-lead-email', async (req, res) => {
+app.post('/api/process-lead-email', upload.none(), async (req, res) => {
   try {
     console.log('📧 Received lead email for processing');
     console.log('📋 Content-Type:', req.headers['content-type']);
