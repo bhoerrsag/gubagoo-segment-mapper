@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gubagoo Mapper Test</title>
+</head>
+<body>
+    <h1>Gubagoo Segment Mapper Test Page</h1>
+    <p>This page simulates your WordPress website with UTM parameters.</p>
+    
+    <div style="margin-top: 20px; padding: 20px; background: #f0f0f0;">
+        <h3>Test Instructions:</h3>
+        <ol>
+            <li>Open browser Developer Tools (F12)</li>
+            <li>Look at the Console tab</li>
+            <li>You should see debug messages from the Gubagoo Mapper</li>
+        </ol>
+    </div>
+
+    <script src="/gubagoo-mapper.js"></script>
+    <script>
+        // Mock Segment Analytics for testing
+        window.analytics = {
+            user: function() {
+                return {
+                    anonymousId: function() {
+                        return 'test-anonymous-id-12345';
+                    }
+                };
+            }
+        };
+        
+        // Mock Gubagoo data
+        setTimeout(() => {
+            window.GUBAGOO = {
+                visitorId: 'test-gubagoo-uuid-67890'
+            };
+            console.log('✅ Mock Gubagoo data loaded');
+        }, 2000);
+    </script>
+</body>
+</html>
