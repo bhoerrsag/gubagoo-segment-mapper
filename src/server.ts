@@ -109,6 +109,12 @@ app.get('/test.html', (req, res) => {
   res.sendFile('test.html', { root: process.cwd() });
 });
 
+// Serve the gubagoo-mapper.js script
+app.get('/gubagoo-mapper.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.sendFile('gubagoo-mapper.js', { root: './public' });
+});
+
 app.listen(PORT, () => {
   console.log(`🚀 Gubagoo Segment Mapper server running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
