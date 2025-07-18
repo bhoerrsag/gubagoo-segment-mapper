@@ -18,8 +18,10 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-  origin: ['https://sportsubarusouth.com', 'http://localhost:3000', 'http://localhost:3001'],
-  credentials: true
+  origin: ['https://sportsubarusouth.com', 'https://www.sportsubarusouth.com', 'http://localhost:3000', 'http://localhost:3001'],
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
 app.use(express.static('public'));
