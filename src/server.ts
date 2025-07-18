@@ -32,7 +32,7 @@ app.get('/health', (req, res) => {
 // Serve the gubagoo-mapper.js script directly
 app.get('/gubagoo-mapper.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'public, max-age=3600'); // Cache for 1 hour
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); // Don't cache during development
   
   const scriptContent = `
 (function() {
