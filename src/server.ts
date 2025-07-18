@@ -84,6 +84,22 @@ app.get('/gubagoo-mapper.js', (req, res) => {
         return null;
     }
     
+    function getShiftDigitalSessionId() {
+        try {
+            const containerHistory = JSON.parse(localStorage.getItem('SD:ContainerHistory') || '[]');
+            const latestEntry = containerHistory.slice(-1)[0];
+            const sessionId = latestEntry?.actionValues?.sessionId;
+            
+            if (sessionId) {
+                log('Found ShiftDigital sessionId from localStorage');
+                return sessionId;
+            }
+        } catch (e) {
+            log('Error getting ShiftDigital sessionId:', e);
+        }
+        return null;
+    }
+    
     function getGubagooVisitorUuid() {
         return new Promise((resolve) => {
             let attempts = 0;
@@ -198,6 +214,10 @@ app.get('/gubagoo-mapper.js', (req, res) => {
         }
         log('Segment anonymous ID:', segmentId);
         
+        // Get ShiftDigital session ID for ADF matching
+        const sdSessionId = getShiftDigitalSessionId();
+        log('ShiftDigital session ID:', sdSessionId);
+        
         log('Waiting for Gubagoo visitor UUID...');
         const gubagooUuid = await getGubagooVisitorUuid();
         
@@ -211,6 +231,7 @@ app.get('/gubagoo-mapper.js', (req, res) => {
         const mappingData = {
             ajs_anonymous_id: segmentId,
             gubagoo_visitor_uuid: gubagooUuid,
+            sd_session_id: sdSessionId, // Add ShiftDigital session ID
             ...urlParams,
             referrer: document.referrer,
             landing_page: window.location.href,

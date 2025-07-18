@@ -2,6 +2,7 @@ export interface GubagooSegmentMapping {
   id?: number;
   ajs_anonymous_id: string;
   gubagoo_visitor_uuid: string;
+  sd_session_id?: string; 
   gubagoo_user_id?: string;
   gubagoo_session_id?: string;
   utm_source?: string;
