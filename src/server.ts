@@ -91,17 +91,46 @@ app.get('/gubagoo-mapper.js', (req, res) => {
                 attempts++;
                 
                 try {
-                    const gubagooIframe = document.querySelector('iframe[src*="gubagoo"]');
-                    if (gubagooIframe) {
-                        log('Found Gubagoo iframe, but cannot access cross-domain localStorage');
+                    // Method 1: Check iframe src for visitor_uuid parameter
+                    const gubagooIframes = document.querySelectorAll('iframe[src*="gubagoo"], iframe[src*="cbo-ui"]');
+                    for (let iframe of gubagooIframes) {
+                        if (iframe.src && iframe.src.includes('visitor_uuid')) {
+                            const match = iframe.src.match(/visitor_uuid=([^&]+)/);
+                            if (match) {
+                                log('Found visitor UUID in iframe src');
+                                resolve(match[1]);
+                                return;
+                            }
+                        }
                     }
                     
+                    // Method 2: Check global data layer objects
+                    if (window.sdDataLayer && window.sdDataLayer.chatSessionId) {
+                        log('Found visitor UUID in sdDataLayer.chatSessionId');
+                        resolve(window.sdDataLayer.chatSessionId);
+                        return;
+                    }
+                    
+                    if (window.sdaDataLayer && window.sdaDataLayer.chatsessionid) {
+                        log('Found visitor UUID in sdaDataLayer.chatsessionid');
+                        resolve(window.sdaDataLayer.chatsessionid);
+                        return;
+                    }
+                    
+                    if (window.sdAdobe && window.sdAdobe.chatsessionid) {
+                        log('Found visitor UUID in sdAdobe.chatsessionid');
+                        resolve(window.sdAdobe.chatsessionid);
+                        return;
+                    }
+                    
+                    // Method 3: Check for GUBAGOO global variable (original method)
                     if (window.GUBAGOO && window.GUBAGOO.visitorId) {
                         log('Found Gubagoo visitor ID via global variable');
                         resolve(window.GUBAGOO.visitorId);
                         return;
                     }
                     
+                    // Method 4: Check script tags for visitor_uuid
                     const scripts = document.querySelectorAll('script');
                     for (let script of scripts) {
                         if (script.textContent && script.textContent.includes('visitor_uuid')) {
@@ -113,14 +142,6 @@ app.get('/gubagoo-mapper.js', (req, res) => {
                             }
                         }
                     }
-                    
-                    window.addEventListener('message', function(event) {
-                        if (event.origin.includes('gubagoo') && event.data && event.data.visitor_uuid) {
-                            log('Received visitor UUID via postMessage');
-                            resolve(event.data.visitor_uuid);
-                            return;
-                        }
-                    });
                     
                 } catch (e) {
                     log('Error checking for Gubagoo UUID:', e);
