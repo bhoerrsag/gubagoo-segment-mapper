@@ -269,6 +269,7 @@ app.post('/api/gubagoo-mapping', async (req, res) => {
     const mappingData: GubagooSegmentMapping = {
       ajs_anonymous_id: req.body.ajs_anonymous_id,
       gubagoo_visitor_uuid: req.body.gubagoo_visitor_uuid,
+      sd_session_id: req.body.sd_session_id, // Add this line
       gubagoo_user_id: req.body.gubagoo_user_id,
       gubagoo_session_id: req.body.gubagoo_session_id,
       utm_source: req.body.utm_source,
