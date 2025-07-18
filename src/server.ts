@@ -469,8 +469,10 @@ async function sendLeadToSegment(leadData: any) {
 app.post('/api/process-lead-email', async (req, res) => {
   try {
     console.log('📧 Received lead email for processing');
+    console.log('📋 Content-Type:', req.headers['content-type']);
+    console.log('📋 All headers:', JSON.stringify(req.headers, null, 2));
     console.log('📋 Raw request body keys:', Object.keys(req.body));
-    console.log('📋 Raw request body:', req.body);
+    console.log('📋 Raw request body:', JSON.stringify(req.body, null, 2));
     
     // Extract email content (SendGrid format)
     const emailSubject = req.body.subject || req.body.Subject || req.body.headers?.Subject;
