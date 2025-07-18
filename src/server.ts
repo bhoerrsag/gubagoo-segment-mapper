@@ -330,6 +330,13 @@ app.get('/api/gubagoo-mapping/:visitorUuid', async (req, res) => {
 // Helper function to parse ADF/XML from email
 async function parseADFEmail(emailBody: string) {
   try {
+    console.log('🔍 Parsing email body...');
+    
+    if (!emailBody) {
+      console.log('❌ No email body provided');
+      return null;
+    }
+    
     // Extract XML from email body (it might be in HTML or plain text)
     let xmlContent = emailBody;
     
@@ -346,6 +353,7 @@ async function parseADFEmail(emailBody: string) {
     const adfMatch = xmlContent.match(/<adf>[\s\S]*?<\/adf>/i);
     if (!adfMatch) {
       console.log('❌ No ADF XML found in email body');
+      console.log('📋 Email body preview:', emailBody.substring(0, 500));
       return null;
     }
     
@@ -460,14 +468,17 @@ async function sendLeadToSegment(leadData: any) {
 app.post('/api/process-lead-email', async (req, res) => {
   try {
     console.log('📧 Received lead email for processing');
+    console.log('📋 Raw request body keys:', Object.keys(req.body));
+    console.log('📋 Raw request body:', req.body);
     
-    // Extract email content (format depends on webhook service)
-    const emailSubject = req.body.subject || req.body.Subject;
-    const emailBody = req.body.body || req.body.text || req.body.html;
-    const emailFrom = req.body.from || req.body.From;
+    // Extract email content (SendGrid format)
+    const emailSubject = req.body.subject || req.body.Subject || req.body.headers?.Subject;
+    const emailBody = req.body.text || req.body.html || req.body.body;
+    const emailFrom = req.body.from || req.body.From || req.body.headers?.From;
     
     console.log('Email from:', emailFrom);
     console.log('Email subject:', emailSubject);
+    console.log('Email body preview:', emailBody ? emailBody.substring(0, 200) : 'No body found');
     
     // Parse ADF/XML from email body
     const leadData = await parseADFEmail(emailBody);
