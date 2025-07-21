@@ -9,26 +9,13 @@ dotenv.config();
 console.log('🔍 Debug Environment Variables:');
 console.log('SUPABASE_URL:', process.env.SUPABASE_URL ? 'Found' : 'MISSING');
 console.log('SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? 'Found' : 'MISSING');
-console.log('SEGMENT_WRITE_KEY:', process.env.SEGMENT_WRITE_KEY ? 'Found' : 'MISSING');
-console.log('ENABLE_SEGMENT:', process.env.ENABLE_SEGMENT || 'false');
+console.log('Current working directory:', process.cwd());
 
 import { SupabaseService } from './utils/supabase';
 import { GubagooSegmentMapping } from './types';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// Initialize Segment Analytics if enabled
-let analytics: any = null;
-if (process.env.ENABLE_SEGMENT === 'true' && process.env.SEGMENT_WRITE_KEY) {
-  try {
-    const { Analytics } = require('@segment/analytics-node');
-    analytics = new Analytics({ writeKey: process.env.SEGMENT_WRITE_KEY });
-    console.log('✅ Segment Analytics initialized');
-  } catch (error) {
-    console.error('❌ Failed to initialize Segment Analytics:', error);
-  }
-}
 
 // Middleware
 app.use(cors({
@@ -38,7 +25,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true })); // Add this line for form data
 app.use(express.static('public'));
 
 // Configure multer for multipart/form-data (SendGrid emails)
@@ -46,18 +33,13 @@ const upload = multer();
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    segment_enabled: process.env.ENABLE_SEGMENT === 'true',
-    segment_initialized: !!analytics
-  });
+  res.json({ status: 'OK', timestamp: new Date().toISOString() });
 });
 
 // Serve the gubagoo-mapper.js script directly
 app.get('/gubagoo-mapper.js', (req, res) => {
   res.setHeader('Content-Type', 'application/javascript');
-  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); // Don't cache during development
   
   const scriptContent = `
 (function() {
@@ -65,7 +47,7 @@ app.get('/gubagoo-mapper.js', (req, res) => {
     
     // Configuration
     const CONFIG = {
-        API_ENDPOINT: 'https://centricattribute.vercel.app/api/gubagoo-mapping',
+        API_ENDPOINT: 'https://gubagoo-segment-mapper.vercel.app/api/gubagoo-mapping',
         GUBAGOO_DOMAIN: 'cbo-ui.gubagoo.io',
         DEBUG: true
     };
@@ -164,7 +146,7 @@ app.get('/gubagoo-mapper.js', (req, res) => {
                         return;
                     }
                     
-                    // Method 3: Check for GUBAGOO global variable
+                    // Method 3: Check for GUBAGOO global variable (original method)
                     if (window.GUBAGOO && window.GUBAGOO.visitorId) {
                         log('Found Gubagoo visitor ID via global variable');
                         resolve(window.GUBAGOO.visitorId);
@@ -254,7 +236,7 @@ app.get('/gubagoo-mapper.js', (req, res) => {
         const mappingData = {
             ajs_anonymous_id: segmentId,
             gubagoo_visitor_uuid: gubagooUuid,
-            sd_session_id: sdSessionId,
+            sd_session_id: sdSessionId, // Add ShiftDigital session ID
             ...urlParams,
             referrer: document.referrer,
             landing_page: window.location.href,
@@ -292,7 +274,7 @@ app.post('/api/gubagoo-mapping', async (req, res) => {
     const mappingData: GubagooSegmentMapping = {
       ajs_anonymous_id: req.body.ajs_anonymous_id,
       gubagoo_visitor_uuid: req.body.gubagoo_visitor_uuid,
-      sd_session_id: req.body.sd_session_id,
+      sd_session_id: req.body.sd_session_id, // Add this line
       gubagoo_user_id: req.body.gubagoo_user_id,
       gubagoo_session_id: req.body.gubagoo_session_id,
       utm_source: req.body.utm_source,
@@ -350,7 +332,7 @@ app.get('/api/gubagoo-mapping/:visitorUuid', async (req, res) => {
   }
 });
 
-// IMPROVED ADF/XML PARSER - Handles exact Gubagoo format
+// Helper function to parse ADF/XML from email
 async function parseADFEmail(emailBody: string) {
   try {
     console.log('🔍 Parsing email body...');
@@ -360,105 +342,57 @@ async function parseADFEmail(emailBody: string) {
       return null;
     }
     
-    // Extract XML from email body - handle HTML encoding
+    // Extract XML from email body (it might be in HTML or plain text)
     let xmlContent = emailBody;
-    if (emailBody.includes('&lt;adf&gt;') || emailBody.includes('&amp;')) {
+    
+    // If email is HTML, extract XML from it
+    if (emailBody.includes('<html>') || emailBody.includes('&lt;adf&gt;')) {
+      // Handle HTML-encoded XML
       xmlContent = emailBody
         .replace(/&lt;/g, '<')
         .replace(/&gt;/g, '>')
-        .replace(/&amp;/g, '&')
-        .replace(/&quot;/g, '"')
-        .replace(/&#39;/g, "'");
+        .replace(/&amp;/g, '&');
     }
     
     // Extract the ADF XML block
     const adfMatch = xmlContent.match(/<adf>[\s\S]*?<\/adf>/i);
     if (!adfMatch) {
       console.log('❌ No ADF XML found in email body');
+      console.log('📋 Email body preview:', emailBody.substring(0, 500));
       return null;
     }
     
     const adfXml = adfMatch[0];
-    console.log('📋 Extracted ADF XML length:', adfXml.length);
+    console.log('📋 Extracted ADF XML:', adfXml.substring(0, 200) + '...');
     
-    // Parse prospect-level IDs
-    const leadId = extractIdBySource(adfXml, 'LeadId');
-    const sdSessionId = extractIdBySource(adfXml, 'sdSessionId');
-    const formType = extractIdBySource(adfXml, 'FormType');
+    // Parse key fields from XML (simple regex parsing)
+    const leadId = extractXmlField(adfXml, 'id', 'source="LeadId"');
+    const sdSessionId = extractXmlField(adfXml, 'id', 'source="sdSessionId"');
+    const firstName = extractXmlField(adfXml, 'name', 'part="first"');
+    const lastName = extractXmlField(adfXml, 'name', 'part="last"');
+    const email = extractXmlField(adfXml, 'email');
+    const phone = extractXmlField(adfXml, 'phone');
+    const year = extractXmlField(adfXml, 'year');
+    const make = extractXmlField(adfXml, 'make');
+    const model = extractXmlField(adfXml, 'model');
+    const vin = extractXmlField(adfXml, 'vin');
+    const stock = extractXmlField(adfXml, 'stock');
     
-    // Parse request date
-    const requestDateStr = extractSimpleField(adfXml, 'requestdate');
-    const requestDate = requestDateStr ? new Date(requestDateStr).toISOString() : new Date().toISOString();
-    
-    // Parse customer information
-    const firstName = extractNameField(adfXml, 'first');
-    const lastName = extractNameField(adfXml, 'last');
-    const email = extractSimpleField(adfXml, 'email');
-    const phone = extractSimpleField(adfXml, 'phone');
-    
-    // Parse address
-    const street = extractAddressField(adfXml, 'street');
-    const city = extractAddressField(adfXml, 'city');
-    const state = extractAddressField(adfXml, 'regioncode');
-    const zipCode = extractAddressField(adfXml, 'postalcode');
-    
-    // Parse primary vehicle (interest="buy")
-    const primaryVehicle = extractPrimaryVehicle(adfXml);
-    
-    // Parse trade-in vehicle info
-    const tradeInInfo = extractTradeInVehicle(adfXml);
-    
-    const parsedData = {
+    return {
       leadId,
       sdSessionId,
-      formType,
-      
-      // Customer info
-      firstName: firstName || null,
-      lastName: lastName || null,
-      email: email || null,
-      phone: phone || null,
-      
-      // Address
-      street: street || null,
-      city: city || null,
-      state: state || null,
-      zipCode: zipCode || null,
-      
-      // Primary vehicle
-      year: primaryVehicle?.year ? parseInt(primaryVehicle.year) : null,
-      make: primaryVehicle?.make || null,
-      model: primaryVehicle?.model || null,
-      vin: primaryVehicle?.vin || null,
-      stock: primaryVehicle?.stock || null,
-      vehicleStatus: primaryVehicle?.status || null, // new/used
-      
-      // Financial info
-      monthlyPayment: primaryVehicle?.monthlyPayment ? parseFloat(primaryVehicle.monthlyPayment) : null,
-      totalAmount: primaryVehicle?.totalAmount ? parseFloat(primaryVehicle.totalAmount) : null,
-      downPayment: primaryVehicle?.downPayment ? parseFloat(primaryVehicle.downPayment) : null,
-      
-      // Trade-in info
-      tradeInYear: tradeInInfo?.year ? parseInt(tradeInInfo.year) : null,
-      tradeInMake: tradeInInfo?.make || null,
-      tradeInModel: tradeInInfo?.model || null,
-      tradeInVin: tradeInInfo?.vin || null,
-      tradeInValue: tradeInInfo?.value ? parseFloat(tradeInInfo.value) : null,
-      tradeInMileage: tradeInInfo?.mileage ? parseInt(tradeInInfo.mileage) : null,
-      
-      requestDate,
+      firstName,
+      lastName,
+      email,
+      phone,
+      year: year ? parseInt(year) : null,
+      make,
+      model,
+      vin,
+      stock,
+      requestDate: new Date().toISOString(),
       rawXml: adfXml
     };
-    
-    console.log('✅ Parsed lead data:', {
-      leadId: parsedData.leadId,
-      sdSessionId: parsedData.sdSessionId,
-      customer: `${parsedData.firstName} ${parsedData.lastName}`,
-      vehicle: `${parsedData.year} ${parsedData.make} ${parsedData.model}`,
-      payment: parsedData.monthlyPayment
-    });
-    
-    return parsedData;
     
   } catch (error) {
     console.error('❌ Error parsing ADF email:', error);
@@ -466,110 +400,21 @@ async function parseADFEmail(emailBody: string) {
   }
 }
 
-// Helper functions for parsing specific ADF fields
-function extractIdBySource(xml: string, source: string): string | null {
-  const pattern = new RegExp(`<id[^>]+source="${source}"[^>]*>([^<]+)<\\/id>`, 'i');
-  const match = xml.match(pattern);
-  return match ? match[1].trim() : null;
-}
-
-function extractSimpleField(xml: string, tagName: string): string | null {
-  const pattern = new RegExp(
-    `<${tagName}[^>]*>\\s*(?:<!\\[CDATA\\[([^\\]]+)\\]\\]>|([^<]+))\\s*<\\/${tagName}>`,
-    'i'
-  );
-  const match = xml.match(pattern);
-  return match ? (match[1] || match[2] || '').trim() : null;
-}
-
-function extractNameField(xml: string, part: string): string | null {
-  const pattern = new RegExp(
-    `<name[^>]+part="${part}"[^>]*>\\s*<!\\[CDATA\\[([^\\]]+)\\]\\]>\\s*<\\/name>`,
-    'i'
-  );
-  const match = xml.match(pattern);
-  return match ? match[1].trim() : null;
-}
-
-function extractAddressField(xml: string, fieldName: string): string | null {
-  const pattern = new RegExp(
-    `<${fieldName}[^>]*>\\s*<!\\[CDATA\\[([^\\]]+)\\]\\]>\\s*<\\/${fieldName}>`,
-    'i'
-  );
-  const match = xml.match(pattern);
-  return match ? match[1].trim() : null;
-}
-
-function extractPrimaryVehicle(xml: string): any {
-  const vehiclePattern = /<vehicle[^>]+interest="buy"[^>]*>([\s\S]*?)<\/vehicle>/i;
-  const vehicleMatch = xml.match(vehiclePattern);
-  
-  if (!vehicleMatch) return null;
-  
-  const vehicleXml = vehicleMatch[1];
-  
-  // Extract vehicle fields
-  const year = extractSimpleField(vehicleXml, 'year');
-  const make = extractSimpleField(vehicleXml, 'make');
-  const model = extractSimpleField(vehicleXml, 'model');
-  const vin = extractSimpleField(vehicleXml, 'vin');
-  const stock = extractSimpleField(vehicleXml, 'stock');
-  
-  // Extract status from vehicle tag
-  const statusMatch = xml.match(/<vehicle[^>]+status="([^"]+)"/i);
-  const status = statusMatch ? statusMatch[1] : null;
-  
-  // Extract finance amounts
-  const monthlyPayment = extractFinanceAmount(vehicleXml, 'monthly');
-  const totalAmount = extractFinanceAmount(vehicleXml, 'total');
-  const downPayment = extractFinanceAmount(vehicleXml, 'downpayment');
-  
-  return {
-    year,
-    make,
-    model,
-    vin,
-    stock,
-    status,
-    monthlyPayment,
-    totalAmount,
-    downPayment
-  };
-}
-
-function extractTradeInVehicle(xml: string): any {
-  const tradePattern = /<vehicle[^>]+interest="trade-in"[^>]*>([\s\S]*?)<\/vehicle>/i;
-  const tradeMatch = xml.match(tradePattern);
-  
-  if (!tradeMatch) return null;
-  
-  const tradeXml = tradeMatch[1];
-  
-  const year = extractSimpleField(tradeXml, 'year');
-  const make = extractSimpleField(tradeXml, 'make');
-  const model = extractSimpleField(tradeXml, 'model');
-  const vin = extractSimpleField(tradeXml, 'vin');
-  const mileage = extractSimpleField(tradeXml, 'odometer');
-  
-  // Extract trade value from price tag
-  const valuePattern = /<price[^>]+type="appraisal"[^>]*>([^<]+)<\/price>/i;
-  const valueMatch = tradeXml.match(valuePattern);
-  const value = valueMatch ? valueMatch[1].replace(/[^\d.-]/g, '') : null;
-  
-  return {
-    year,
-    make,
-    model,
-    vin,
-    mileage,
-    value
-  };
-}
-
-function extractFinanceAmount(xml: string, type: string): string | null {
-  const pattern = new RegExp(`<amount[^>]+type="${type}"[^>]*>([^<]+)<\\/amount>`, 'i');
-  const match = xml.match(pattern);
-  return match ? match[1].replace(/[^\d.-]/g, '') : null;
+// Helper function to extract XML field values
+function extractXmlField(xml: string, tagName: string, attributes?: string): string | null {
+  try {
+    let pattern;
+    if (attributes) {
+      pattern = new RegExp(`<${tagName}[^>]*${attributes}[^>]*><!\\[CDATA\\[([^\\]]+)\\]\\]><\\/${tagName}>|<${tagName}[^>]*${attributes}[^>]*>([^<]+)<\\/${tagName}>`, 'i');
+    } else {
+      pattern = new RegExp(`<${tagName}[^>]*><!\\[CDATA\\[([^\\]]+)\\]\\]><\\/${tagName}>|<${tagName}[^>]*>([^<]+)<\\/${tagName}>`, 'i');
+    }
+    
+    const match = xml.match(pattern);
+    return match ? (match[1] || match[2] || '').trim() : null;
+  } catch (error) {
+    return null;
+  }
 }
 
 // Helper function to send lead to Segment
@@ -577,31 +422,27 @@ async function sendLeadToSegment(leadData: any) {
   try {
     console.log('📊 Sending lead to Segment:', leadData.leadId);
     
-    if (!analytics) {
-      console.log('⚠️ Segment not enabled, skipping Segment event');
-      return true;
-    }
-    
+    // This is where we'll integrate with Segment
+    // For now, just log what we would send
     const segmentEvent = {
       anonymousId: leadData.ajs_anonymous_id,
       event: 'Lead Submitted',
       properties: {
-        // Source identification
         source: 'Gubagoo Virtual Retailing',
         leadId: leadData.leadId,
-        leadType: leadData.formType,
-        
-        // Customer information (for profile matching)
         email: leadData.email,
         phone: leadData.phone,
         firstName: leadData.firstName,
         lastName: leadData.lastName,
         
-        // Address
-        street: leadData.street,
-        city: leadData.city,
-        state: leadData.state,
-        zipCode: leadData.zipCode,
+        // Vehicle info
+        vehicle: {
+          year: leadData.year,
+          make: leadData.make,
+          model: leadData.model,
+          vin: leadData.vin,
+          stock: leadData.stock
+        },
         
         // Attribution data
         utm_source: leadData.utm_source,
@@ -612,36 +453,14 @@ async function sendLeadToSegment(leadData: any) {
         gclid: leadData.gclid,
         fbclid: leadData.fbclid,
         referrer: leadData.referrer,
-        landing_page: leadData.landing_page,
-        
-        // Vehicle information
-        vehicle_year: leadData.year,
-        vehicle_make: leadData.make,
-        vehicle_model: leadData.model,
-        vehicle_vin: leadData.vin,
-        vehicle_stock: leadData.stock,
-        vehicle_status: leadData.vehicleStatus,
-        
-        // Financial information
-        monthly_payment: leadData.monthlyPayment,
-        down_payment: leadData.downPayment,
-        total_amount: leadData.totalAmount,
-        
-        // Trade-in information
-        trade_in_year: leadData.tradeInYear,
-        trade_in_make: leadData.tradeInMake,
-        trade_in_model: leadData.tradeInModel,
-        trade_in_vin: leadData.tradeInVin,
-        trade_in_value: leadData.tradeInValue,
-        trade_in_mileage: leadData.tradeInMileage,
-        
-        // Timing
-        request_date: leadData.requestDate
+        landing_page: leadData.landing_page
       }
     };
     
-    await analytics.track(segmentEvent);
-    console.log('✅ Segment event sent successfully');
+    console.log('✅ Segment event ready:', segmentEvent);
+    
+    // TODO: Implement actual Segment API call
+    // await analytics.track(segmentEvent);
     
     return true;
   } catch (error) {
@@ -655,24 +474,29 @@ app.post('/api/process-lead-email', upload.none(), async (req, res) => {
   try {
     console.log('📧 Received lead email for processing');
     console.log('📋 Content-Type:', req.headers['content-type']);
+    console.log('📋 All headers:', JSON.stringify(req.headers, null, 2));
+    console.log('📋 Raw request body keys:', Object.keys(req.body));
+    console.log('📋 Raw request body:', JSON.stringify(req.body, null, 2));
     
     // Extract email content (SendGrid format)
     const emailSubject = req.body.subject;
     const emailFrom = req.body.from;
     const emailTo = req.body.to;
     
-    // Handle both direct JSON and raw email formats
+    // SendGrid sends the full email in the 'email' field as raw MIME
+    const rawEmail = req.body.email;
+    
+    // Extract text content from the raw email
     let emailBody = '';
-    if (req.body.text) {
-      // Direct text content (like your Gmail test)
-      emailBody = req.body.text;
-    } else if (req.body.email) {
-      // Raw MIME email from SendGrid
-      const rawEmail = req.body.email;
+    if (rawEmail) {
+      // Look for text/plain content
       const textMatch = rawEmail.match(/Content-Type: text\/plain[^]*?\r?\n\r?\n([^]*?)(?=\r?\n--|\r?\n\r?\nContent-Type|\r?\n$)/);
       if (textMatch) {
         emailBody = textMatch[1].trim();
-      } else {
+      }
+      
+      // If no plain text, try HTML content  
+      if (!emailBody) {
         const htmlMatch = rawEmail.match(/Content-Type: text\/html[^]*?\r?\n\r?\n([^]*?)(?=\r?\n--|\r?\n\r?\nContent-Type|\r?\n$)/);
         if (htmlMatch) {
           emailBody = htmlMatch[1].trim();
@@ -682,7 +506,8 @@ app.post('/api/process-lead-email', upload.none(), async (req, res) => {
     
     console.log('Email from:', emailFrom);
     console.log('Email subject:', emailSubject);
-    console.log('Email body length:', emailBody ? emailBody.length : 0);
+    console.log('Email to:', emailTo);
+    console.log('Email body extracted:', emailBody ? emailBody.substring(0, 200) : 'No body found');
     
     // Parse ADF/XML from email body
     const leadData = await parseADFEmail(emailBody);
@@ -693,11 +518,12 @@ app.post('/api/process-lead-email', upload.none(), async (req, res) => {
     
     if (!leadData.sdSessionId) {
       console.log('⚠️ No sdSessionId found in ADF data');
+      // Store as pending lead for manual review
       await SupabaseService.savePendingLead({
         lead_id: leadData.leadId,
         sd_session_id: null,
         email_subject: emailSubject,
-        email_body: emailBody.substring(0, 1000),
+        email_body: emailBody,
         lead_data: leadData
       });
       
@@ -715,11 +541,12 @@ app.post('/api/process-lead-email', upload.none(), async (req, res) => {
     
     if (!visitorData) {
       console.log('⚠️ No visitor data found for session ID:', leadData.sdSessionId);
+      // Store as pending lead for manual review
       await SupabaseService.savePendingLead({
         lead_id: leadData.leadId,
         sd_session_id: leadData.sdSessionId,
         email_subject: emailSubject,
-        email_body: emailBody.substring(0, 1000),
+        email_body: emailBody,
         lead_data: leadData
       });
       
@@ -777,11 +604,10 @@ app.post('/api/process-lead-email', upload.none(), async (req, res) => {
 // Stats endpoint (optional - for monitoring)
 app.get('/api/stats', async (req, res) => {
   try {
+    // You can add database queries here to get stats
     res.json({ 
       status: 'Server running',
       timestamp: new Date().toISOString(),
-      segment_enabled: process.env.ENABLE_SEGMENT === 'true',
-      segment_initialized: !!analytics,
       message: 'Stats endpoint ready for implementation'
     });
   } catch (error) {
