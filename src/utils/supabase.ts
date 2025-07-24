@@ -19,7 +19,7 @@ export class SupabaseService {
     
     const { data, error } = await supabase
       .from('gubagoo_segment_mapping')
-      .upsert(mapping, { onConflict: 'gubagoo_visitor_uuid' });
+      .upsert(mapping, { onConflict: 'sd_session_id' });
     
     if (error) {
       console.error('Error saving mapping:', error);

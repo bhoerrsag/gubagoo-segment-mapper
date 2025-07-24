@@ -292,9 +292,9 @@ app.post('/api/gubagoo-mapping', async (req, res) => {
     };
 
     // Validate required fields
-    if (!mappingData.ajs_anonymous_id || !mappingData.gubagoo_visitor_uuid) {
+    if (!mappingData.ajs_anonymous_id || !mappingData.sd_session_id) {
       return res.status(400).json({ 
-        error: 'Missing required fields: ajs_anonymous_id and gubagoo_visitor_uuid' 
+        error: 'Missing required fields: ajs_anonymous_id and sd_session_id' 
       });
     }
 
@@ -303,7 +303,7 @@ app.post('/api/gubagoo-mapping', async (req, res) => {
     res.json({ 
       success: true, 
       message: 'Mapping saved successfully',
-      visitor_uuid: mappingData.gubagoo_visitor_uuid
+      sd_session_id: mappingData.sd_session_id
     });
 
   } catch (error) {
